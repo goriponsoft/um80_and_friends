@@ -119,7 +119,7 @@ STRIP_PARITY = bytes(b & 0x7F for b in range(256))
 LONE_8AH = re.compile(rb'(?<![\r\x8d])\x8a')
 
 
-def source_lines(data, dri=False):
+def source_lines(data, dri=False, bit8=False):
     """The lines of a source file, read from its bytes as CP/M's assemblers
     read them: as MACRO-80 reads them, or with `dri' as MAC and RMAC do
     (mac_source_lines()).
@@ -143,16 +143,40 @@ def source_lines(data, dri=False):
     three - the INX B is comment - and UTF-8 text in a comment has 8AH
     bytes (U+4E0A is E4 B8 8A).  In a string M80 gives `A', 8AH, `B' as 61
     62, where MAC and RMAC give 61 0A 62.
+
+    With `bit8' (--8bit) the file is not read as CP/M text at all: its
+    bytes are taken as they stand (raw_source_lines()), so a source in
+    an 8-bit encoding, such as Shift_JIS, keeps its bytes in strings
+    and in comments.  The DRI byte reading does not apply either:
+    `dri' then governs only how statements are read, not the file.
     """
     eof = data.find(0x1A)
     if eof >= 0:
         data = data[:eof]
+    if bit8:
+        return raw_source_lines(data)
     if dri and (0x8D in data or LONE_8AH.search(data)):
         # Where no 8AH or 8DH is inside a line both read the file alike,
         # and this is the faster.
         return mac_source_lines(data)
     data = LONE_8AH.sub(b'', data)
     text = data.translate(STRIP_PARITY).decode('ascii')
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = text.rstrip('\x00')  # padding nulls
+    return text.split('\n')
+
+
+def raw_source_lines(data):
+    """The lines of a source file read as 8-bit text (--8bit): no byte
+    loses bit 7, an 8AH byte is an ordinary byte and an 8DH is not a CR.
+
+    A 1AH (^Z) has already ended the file (source_lines()).  Each line
+    ends at a CR, a LF or a CR LF, as in the CP/M reading.  The bytes
+    are decoded as Latin-1, which gives every byte a character of the
+    same value, so a character read back with ord() - a string's bytes
+    above all - is the byte that was in the file.
+    """
+    text = data.decode('latin-1')
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     text = text.rstrip('\x00')  # padding nulls
     return text.split('\n')
@@ -463,7 +487,7 @@ class Assembler:
     """MACRO-80 compatible assembler."""
 
     def __init__(self, predefined=None, export_all_symbols=False, truncate_symbols=False,
-                 strict_jr=False, dri=False):
+                 strict_jr=False, dri=False, bit8=False):
         self.symbols = {}  # Symbol table
         # --dri: read the source as DRI's MAC and RMAC do where they differ
         # from MACRO-80 - a `$' inside a name is left out (_dri_statement()),
@@ -471,6 +495,7 @@ class Assembler:
         # percent_argument()), and an IF a body leaves open ends with it
         # (end_conditionals()).
         self.dri = dri
+        self.bit8 = bit8  # --8bit flag: read the source as 8-bit text (source_lines())
         self.export_all_symbols = export_all_symbols  # -g flag: export all as PUBLIC
         self.truncate_symbols = truncate_symbols  # -t flag: names cut to 6 chars, as M80
         self.strict_jr = strict_jr  # --strict flag: error on out-of-range JR instead of promoting to JP
@@ -6463,7 +6488,7 @@ class Assembler:
         try:
             # Read the include file
             with open(filepath, 'rb') as f:
-                lines = source_lines(f.read(), self.dri)
+                lines = source_lines(f.read(), self.dri, self.bit8)
 
             # Reset line number for include file
             self.line_num = 0
@@ -6643,7 +6668,7 @@ class Assembler:
                         return False
                     try:
                         with open(filepath, 'rb') as f:
-                            text = source_lines(f.read(), self.dri)
+                            text = source_lines(f.read(), self.dri, self.bit8)
                         pre_lines.extend(text)
                         pre_origins.extend(
                             (os.path.basename(filepath), n)
@@ -6654,7 +6679,7 @@ class Assembler:
 
         # Read source - handle CP/M format (CR/LF, ^Z EOF, 128-byte records)
         with open(source_file, 'rb') as f:
-            text = source_lines(f.read(), self.dri)
+            text = source_lines(f.read(), self.dri, self.bit8)
         lines = pre_lines + text
         self.line_origins = pre_origins + [(None, n) for n in
                                            range(1, len(text) + 1)]
@@ -6984,6 +7009,17 @@ def main():
                              '4241H, IF is true when bit 0 is set, / is '
                              'unsigned, and MACLIB NAME reads NAME.LIB in pass 1 '
                              'only')
+    parser.add_argument('--8bit', dest='bit8', action='store_true',
+                        help='Read the source as 8-bit text: every byte is '
+                             'taken as it stands, with no parity bit '
+                             'cleared, so a file in an 8-bit encoding '
+                             '(such as Shift_JIS) keeps its bytes in '
+                             'strings and in comments')
+    parser.add_argument('--7bit', dest='bit8', action='store_false',
+                        help='Read the source as CP/M 7-bit text (the '
+                             'default): bit 7 of every byte is cleared, '
+                             'as MACRO-80, MAC and RMAC read a file. '
+                             'When both are given the last one wins')
     parser.add_argument('-s', '--strict', action='store_true',
                         help='Strict mode: error on out-of-range JR/DJNZ instead of promoting to JP')
 
@@ -7012,7 +7048,7 @@ def main():
     # Create assembler and run
     asm = Assembler(predefined=predefined, export_all_symbols=args.globals,
                     truncate_symbols=args.truncate, strict_jr=args.strict,
-                    dri=args.dri)
+                    dri=args.dri, bit8=args.bit8)
     if args.aseg:
         asm.default_seg = 'ASEG'
         asm.current_seg = 'ASEG'
