@@ -45,9 +45,9 @@ files for debugging. The linker can then output all symbols with their final
 relocated addresses using the \fB\-S\fR option.
 .TP
 .B \-t\fR, \fB\-\-truncate
-Cut every PUBLIC, EXTRN and module name in the .REL file to 6 characters, as
+Cut every PUBLIC, EXTRN, ## external and module name in the .REL file to 6 characters, as
 MACRO-80 does. Use it for an object that is to be linked with objects that
-M80 assembled, when a PUBLIC or EXTRN name is longer than 6 characters.
+M80 assembled, when a PUBLIC, EXTRN or ## name is longer than 6 characters.
 .TP
 .B \-\-aseg
 Start the file in ASEG, so that an ORG is an absolute address, as in
@@ -139,7 +139,11 @@ Add a directory to the include file search path. Can be specified multiple times
 .SH SOURCE FORMAT
 Assembly source files consist of lines containing:
 .IP \(bu 2
-Labels (optional) followed by a colon.  The first word of a statement is
+Labels (optional) followed by a colon.  A name is letters, digits and
+\fB$ . ? @ _\fR, and a digit does not start one: a name may begin with a dot
+(\fB.FOO:\fR, \fB..BAR\fR), as in MACRO-80.  A dot-directive (\fB.Z80\fR,
+\fB.PHASE\fR, ...) with a colon at once after it is a label
+(\fB.Z80:\fR changes no mode).  The first word of a statement is
 its operation, in column 1 or not (\fBNOP\fR in column 1 is an instruction),
 except the name in front of an EQU, SET, DEFL, ASET or MACRO.  As in
 MACRO-80, a statement whose first word is no instruction, directive or macro
@@ -402,7 +406,8 @@ Symbol names are converted to uppercase.
 The .REL file format is binary-compatible with the original: LINK-80 3.44
 loads um80's objects. LINK-80 refuses a symbol of more than 7 characters
 (more than 6 for an external inside a link-time expression), which um80
-writes in an extended form only ul80 reads; M80 itself keeps 6, as
+writes in an extended form only ul80 reads. M80 itself writes the first 6
+characters of a PUBLIC or external name in the .REL, as
 .B \-t
 does.
 .SH AUTHOR

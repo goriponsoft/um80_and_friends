@@ -100,7 +100,7 @@ INSTRUCTIONS_Z80 = frozenset(
 # A name that begins a statement, and the name of an EQU, SET, DEFL, ASET or
 # MACRO in front of its directive (see Assembler.parse_line()).
 NAME_WORD = re.compile(r'([$A-Za-z_@?][A-Za-z0-9_@?$.]*)\s*')
-NAME_DEFINITION = re.compile(r'([$A-Za-z_@?][A-Za-z0-9_@?$.]*)\s+'
+NAME_DEFINITION = re.compile(r'([$A-Za-z_@?.][A-Za-z0-9_@?$.]*)\s+'
                              r'(?:EQU|SET|DEFL|ASET|MACRO)(?![A-Za-z0-9_@?$.])',
                              re.IGNORECASE)
 # MAC's line number in front of a statement, and its assembly controls
@@ -109,7 +109,7 @@ LINE_NUMBER = re.compile(r'\d[0-9A-Za-z$]*(?:\s+|$)')
 DRI_CONTROL = re.compile(r'\$[-+*][A-Za-z]')
 # A word with no colon, and the directive after it that a line of a body
 # being defined is read for (Assembler._body_word()).
-BODY_WORD = re.compile(r'\s*([$A-Za-z_@?&][A-Za-z0-9_@?$.&]*)[ \t]+'
+BODY_WORD = re.compile(r'\s*([$A-Za-z_@?.&][A-Za-z0-9_@?$.&]*)[ \t]+'
                        r'(MACRO|REPT|IRPC|IRP|ENDM|LOCAL)(?![A-Za-z0-9_@?$.&])',
                        re.IGNORECASE)
 
@@ -1692,7 +1692,7 @@ class Assembler:
         if self.prefix_word(expr, 'TYPE') is not None:
             self.reading_pure = False
             arg = expr[4:].strip()
-            if re.match(r'^[A-Za-z_@?][A-Za-z0-9_@?$.]*$', arg):
+            if re.match(r'^[$A-Za-z_@?.][A-Za-z0-9_@?$.]*$', arg):
                 if (arg.upper() in REG_VALUES and not self.z80_mode
                         and not self.names_symbol(arg)):
                     return ExprValue(0x20)  # a number, as M80 has it
@@ -1707,11 +1707,15 @@ class Assembler:
                 return ExprValue(0)
             return ExprValue(self.type_of(arg))
 
-        # Handle ## suffix (6-character truncation operator, implies external)
+        # NAME## makes NAME external, unless this module defines it
         if expr.endswith('##'):
             self.reading_pure = False
-            # Truncate symbol to 6 chars and look it up
-            sym_name = expr[:-2][:6]
+            # The whole name, as EXTRN, PUBLIC and :: use it.  M80 keeps 16
+            # characters of a name in its symbol table and writes the first
+            # 6 of an external name in the .REL; -t cuts to 6 only in the
+            # .REL writer.  Cutting here made STAYTOP## an external STAYTO
+            # that no `STAYTOP::' of another module met (issue #6).
+            sym_name = expr[:-2]
             sym = self.lookup_symbol(sym_name)
             if sym.external:
                 return ExprValue(0, ext=True, name=sym.name)
@@ -1724,7 +1728,7 @@ class Assembler:
             return self.symbol_value(sym)
 
         # Try as simple symbol
-        if re.match(r'^[$A-Za-z_@?][A-Za-z0-9_@?$.]*$', expr):
+        if re.match(r'^[$A-Za-z_@?.][A-Za-z0-9_@?$.]*$', expr):
             upper = expr.upper()
 
             # A register name, but for a symbol of that name (M80 reads
@@ -2142,7 +2146,7 @@ class Assembler:
         elif line[:6].upper() == '*EJECT':
             # MACRO-80's page eject, in column 1 only.
             return (None, '*EJECT', line[6:].strip(), comment)
-        match = re.match(r'^([$A-Za-z_@?][A-Za-z0-9_@?$.]*)(::|:)\s*', stripped)
+        match = re.match(r'^([$A-Za-z_@?.][A-Za-z0-9_@?$.]*)(::|:)\s*', stripped)
         if match:
             label = match.group(1)
             colons = match.group(2)
@@ -4991,7 +4995,7 @@ class Assembler:
                             and operator not in ('IRP', 'IRPC')):
             return dropped
         # The label and the operator, as parse_line() finds them.
-        head = re.match(r'\s*' + (r'[$A-Za-z_@?][A-Za-z0-9_@?$.]*(?:::?)?\s*'
+        head = re.match(r'\s*' + (r'[$A-Za-z_@?.][A-Za-z0-9_@?$.]*(?:::?)?\s*'
                                   if label else '')
                         + r'([$A-Za-z_@?.][A-Za-z0-9_@?$.]*)\s*', line)
         if not head or drop_name_dollars(head.group(1)).upper() != operator:
@@ -5369,7 +5373,7 @@ class Assembler:
         end it there.
         """
         if '&' in line:
-            m = re.match(r'\s*([$A-Za-z_@?&][A-Za-z0-9_@?$.&]*)::?(\s.*)?$', line)
+            m = re.match(r'\s*([$A-Za-z_@?.&][A-Za-z0-9_@?$.&]*)::?(\s.*)?$', line)
             if m and '&' in m.group(1):
                 return m.group(1), self.parse_line('\t' + (m.group(2) or ''))[1]
         # M80 reads a REPT body for the first word only (_body_word()).
@@ -6994,7 +6998,8 @@ def main():
                              'labels (docs/debug_info.md). The .rel is the same '
                              'with and without it')
     parser.add_argument('-t', '--truncate', action='store_true',
-                        help='Cut PUBLIC, EXTRN and module names to 6 characters, as M80 does')
+                        help='Cut PUBLIC, EXTRN, ## external and module names '
+                             'to 6 characters in the .REL, as M80 does')
     parser.add_argument('--aseg', action='store_true',
                        help='Assemble as absolute code, the way DRI\'s MAC does: '
                             'the file starts in ASEG, so ORG is an absolute address')

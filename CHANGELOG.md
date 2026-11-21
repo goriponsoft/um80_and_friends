@@ -2,6 +2,70 @@
 
 All notable changes to the um80 toolchain are documented here.
 
+## [0.4.3] - 2026-11-20
+
+### X## names an external by its whole name (issue #6)
+
+um80 cut the name of a `##` reference to 6 characters before the symbol
+lookup. `STAYTOP##` made an external `STAYTO`. A `STAYTOP::` in another
+module did not meet that external, and ul80 said "Undefined symbol: STAYTO".
+`STAYTOP##` followed by a plain `STAYTOP` in one module gave "Undefined
+symbol".
+
+`##` now uses the whole name, as `EXTRN`, `PUBLIC` and `::` do. `-t` cuts the
+name to 6 characters in the .REL only.
+
+Measured with MACRO-80 3.44 and LINK-80 3.44 on 2026-11-20: M80 keeps 16
+characters of a name in its symbol table. In the .REL it writes the first 6
+characters of a PUBLIC or external name. `LONGNAME1##` and `LONGNAME2##` are
+two externals, both written `LONGNA`. With `-t`, um80 now writes the same .REL
+items.
+
+`docs/EXTENSIONS.md`, `docs/mbasic2025.md`, the um80 man page and two
+comments in `relformat.py` said that M80 keeps 6 characters of every symbol.
+That was wrong. The text now gives the measured rule, and `um80 --help` says
+that `-t` cuts `##` external names too.
+
+Two changes for old sources:
+
+- After `STAYTOP##`, a plain `STAYTO` is now "Undefined symbol", as M80 flags U.
+- To link a um80 object with an object that M80 assembled, use `-t` for long
+  `##` names, as for long `EXTRN` names.
+
+`tests/test_hash_external.py` has 8 tests. 7 of them fail with the old code.
+
+### A name may begin with a dot (issue #7)
+
+um80 read a word that began with `.` as a dot-directive. A label such as
+`.FOO:` gave "Unknown instruction or directive: .FOO", and `JP .FOO` gave
+"Cannot parse expression". A `.Z80:` label was worse: um80 took it for the
+`.Z80` directive, defined no label, and dropped the rest of the line (a `NOP`
+after it) without an error. `.PHASE:` and `.RADIX:` gave a parse error.
+
+A name may begin with `.` now. Names such as `.FOO`, `..BAR`, `.XC.0`,
+`.201B`, `.HJ001`, `.0` and `.1H` work in all places that take a name:
+
+- a label (`:` and `::`)
+- the name of an `EQU`, `SET`, `DEFL`, `ASET` or `MACRO`
+- a macro parameter, `LOCAL`, and a name made with `&`
+- every operand and expression.
+
+A dot-directive with a `:` at once after it is a label. The mode, the listing and the phase do not change. With
+`--dri`, um80 takes `.FOO:`. A dot word with no colon is still an error.
+
+Measured with MACRO-80 3.44 and LINK-80 3.44 on 2026-11-20: a name starts with
+one of `A-Za-z$.?@_` and continues with those characters and digits. A name
+with a leading dot acts like the same name without it. `.` alone is a name,
+not the location counter. `.AND.` is an undefined name, not an operator.
+
+`tests/test_dot_names.py` has 101 tests with expected bytes read from M80 and
+L80. 87 of them fail with the old code.
+
+ucref80 read the source with a name pattern that had no `.`. It listed `.FOO`
+as `FOO` and `X.1` as `X`. It now reads names as M80 does. It no longer lists
+a number such as `0FFH` as the symbol `FFH`. `tests/test_ucref80.py` has
+4 tests. ux80 is not changed.
+
 ## [0.4.2] - 2026-11-05
 
 ### udb80 --wait-program takes the rule's stop as T05
